@@ -98,7 +98,7 @@ while looping:
     except:
         print('Invalid input.')
         continue
-    if choice not in range(1,3):
+    if choice not in range(1,4):
         print('Enter a number corresponding to one of the listed options.')
         continue
     if choice < 2:
@@ -132,4 +132,3 @@ while looping:
         df_out.to_csv(out_file, index=False)
     elif choice < 4:
         looping = False
-

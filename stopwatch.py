@@ -19,13 +19,26 @@ import pandas as pd
 # Window and frame creation
 window = tk.Tk()
 window.title("Stopwatch")
-icon = tk.PhotoImage(file ='icon.png')
-window.iconphoto(False, icon)
+if os.path.exists('icon.png'):
+    icon = tk.PhotoImage(file ='icon.png')
+    window.iconphoto(False, icon)
 
 # Get command-line arguments
 # Currently only one is debug level
 # No checking or parsing done currently, just basic debug use
-args = sys.argv
+# Parse command-line arguments with default values
+args = {"debug_level": 0, "log_path_txt": 'timelog.txt', "log_path_csv": 'time_log.csv', "analysis_script": 'log_analysis_gui.py'}  # Default debug level is 0
+for arg in sys.argv[1:]:
+    if arg.find('=') != -1:
+        arg_name, arg_value = arg.split('=')
+        try:
+            arg_value = type(args[arg_name])(arg_value)
+            args[arg_name] = arg_value
+        except:
+            print(f"Error: Argument {arg_name} value of {arg_value} is not of type {type(args[arg_name])}. Keeping default value of {args[arg_name]}.")
+    else:
+        print(f"Error: Argument {arg} is not in the format 'arg=value'. Ignoring argument.")
+
 
 # Level of debug info printed during runtime. Higher levels also print lower levels
 # 0 = no debug info
@@ -33,10 +46,11 @@ args = sys.argv
 # 2 = discrete info (responses to buttons, single events, etc)
 # 3 = continuous info (constant info from repeated events like timer updating)
 # 4 = exterminator mode (currently unused)
-DEBUG_LEVEL = int(args[1])
+DEBUG_LEVEL = args["debug_level"]
+log_path_txt = args["log_path_txt"]
+log_path_csv = args["log_path_csv"]
+analysis_script = args["analysis_script"]
 
-log_path_txt = 'timelog.txt'
-log_path_csv = 'time_log.csv'
 
 timerPauses = []
 timeractive = False
@@ -44,6 +58,7 @@ timertext = tk.StringVar(window, "00h00m00.0s")
 timestart_text = tk.StringVar(window, "Click [Start/Stop] to start timer.")
 flagtime = None
 timeflag_text = tk.StringVar(window, "Click [Toggle Flag] to set\na temporary timestamp")
+
 
 # Recursively change background color of widget and its children
 def ChangeBGColor(widget, color):
@@ -167,6 +182,8 @@ def ToggleTimer():
     if DEBUG_LEVEL >= 2:
         print(f"Timer {'stopped' if timeractive else 'started'} At: ", timerPauses[-1])
     timeractive = not timeractive
+    # Add media toggle when timer state changes
+    toggle_media_playback()
     ChangeBGColor(window, "#ffd1d8" if timeractive else "#e1fbff")
     if timeractive:
         UpdateTimer()
@@ -229,6 +246,10 @@ def OpenLog():
     else:                                   # linux variants
         subprocess.call(('xdg-open', log_path_csv))
 
+def OpenAnalysis():
+    import subprocess
+    subprocess.run(['python3', analysis_script])
+
 def ToggleFlag():
     global flagtime
     global timeflag_text
@@ -240,15 +261,57 @@ def ToggleFlag():
         timeflag_text.set("No Time Flag Set\nClick [Toggle Flag] to set.")
     UpdateTimer()
 
+
+def toggle_media_playback():
+    if not media_control_enabled.get():
+        return
+    try:
+        # Use pynput to simulate media key press
+        from pynput.keyboard import Key, Controller
+        keyboard = Controller()
+        keyboard.press(Key.media_play_pause)
+        keyboard.release(Key.media_play_pause)
+
+    except Exception as e:
+        if DEBUG_LEVEL >= 1:
+            print(f"Media toggle failed: {e}")
+confirm_open = False
+def OnClose():
+    global confirm_open, timerPauses
+    if not confirm_open:
+        # Ask for confirmation with options to log time or not
+        if len(timerPauses) > 0:
+            from tkinter import messagebox
+            confirm_open = True
+            response = messagebox.askyesnocancel("Confirm Exit", 
+                                            "Do you want to save your time log before exiting?",
+                                            icon='warning')
+            confirm_open = False
+            if response is None:  # Cancel was clicked
+                return
+            elif response:  # Yes was clicked
+                LogTimeCSV()
+        window.destroy()
+
+# Set the window's close protocol to use OnClose
+window.protocol("WM_DELETE_WINDOW", OnClose)
+
+# Timer
 timerframe = tk.Frame(window)
 timerlbl = tk.Label(timerframe, textvariable=timertext, font=('Courier 30'), padx=30, pady=20)
 timerlbl.pack()
 timerframe.pack()
 
+# User interface
 ux = tk.Frame(window)
 name_text = tk.StringVar(window, "Untitled Stopwatch")
 subtitle_text = tk.StringVar(window, "Unconfigured")
 info_text = tk.StringVar(window, "No Info")
+# Add media control checkbox
+media_control_enabled = tk.BooleanVar(window, False)
+media_checkbox = tk.Checkbutton(ux, text="Pause toggles media", 
+                              variable=media_control_enabled)
+media_checkbox.pack()
 
 from tkinter import ttk
 name_select = ttk.Combobox(ux, textvariable = name_text)
@@ -263,12 +326,15 @@ sub_select.pack()
 info_input = tk.Entry(ux, textvariable = info_text)
 info_input.pack()
 
+# Flag label and button
 flaglbl = tk.Label(ux, textvariable=timeflag_text)
 flaglbl.pack()
 startlbl = tk.Label(ux, textvariable=timestart_text)
 startlbl.pack()
 flagButton = tk.Button(ux, command=ToggleFlag, text="Toggle Flag")
 flagButton.pack()
+
+# Button frame
 btnframe = tk.Frame(ux)
 timeButton = tk.Button(btnframe, command=ToggleTimer, text="Start/Stop", bg="#aeffa3", activebackground="#bdffea")
 timeButton.grid(row=0, column=0, sticky="nesw")
@@ -279,8 +345,12 @@ logButton.grid(row=1, column=0, sticky="nesw")
 openLogButton = tk.Button(btnframe, command=OpenLog, text="Open Log")
 openLogButton.grid(row=1, column=1, sticky="nesw")
 btnframe.pack()
+
+# Analysis button
+analysisButton = tk.Button(ux, command=OpenAnalysis, text="Open Log Analysis Tool", bg="#c296ff")
+analysisButton.pack()
 ux.pack()
 
 ChangeBGColor(window, "#bad1ff")
-window.geometry("300x350")
+window.geometry("300x400")
 window.mainloop()
