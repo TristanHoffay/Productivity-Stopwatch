@@ -168,9 +168,9 @@ def convert_objects(df):
     df['Elapsed Time'] = pd.to_timedelta(df['Elapsed Time'])
     df['Start Time'] = pd.to_datetime(df['Start Time'])
     df['End Time'] = pd.to_datetime(df['End Time'])
-    for d in range(1, df['Duration Count'].max() + 1):
+    for d in range(1, int(df['Duration Count'].max()) + 1):
         df[f'Duration {d}'] = pd.to_timedelta(df[f'Duration {d}'])
-        if d < df['Duration Count'].max():
+        if d < int(df['Duration Count'].max()):
             df[f'Paused {d}'] = pd.to_timedelta(df[f'Paused {d}'])
     return df
 
@@ -182,13 +182,13 @@ def convert_objects(df):
 def program():
     looping = True
     while looping:
-        choice = Prompt("Select an option to continue:\n1: Convert text log to CSV data\n2: Fix/Restructure CSV log\n3: Quit\n(Other functionalities to be added soon)\n\nOption: ")
+        choice = Prompt("Select an option to continue:\n1: Convert text log to CSV data\n2: Fix/Restructure CSV log\n3: Quit\n4: View Statistics\n(Other functionalities to be added soon)\n\nOption: ")
         try:
             choice = int(choice)
         except:
             WriteText('Invalid input.')
             continue
-        if choice not in range(1,4):
+        if choice not in range(1,5):
             WriteText('Enter a number corresponding to one of the listed options.')
             continue
         if choice < 2:
@@ -222,16 +222,73 @@ def program():
             df_out.to_csv(out_file, index=False)
         elif choice < 4:
             looping = False
+        elif choice < 5:
+            in_file = Prompt(f"Enter file path/name for CSV to analyze, or leave empty to use default: {csv_main_path}\nPath: ")
+            if len(in_file) < 1:
+                in_file = csv_main_path
+            df = get_log_df(in_file)
+            df.dropna(inplace=True, how='all')
+            if df is not None:
+                WriteText("Statistics for Time Log:")
+                # Total time
+                total_time = df['Elapsed Time'].sum()
+                WriteText(f"Total Time Logged: {total_time}")
+
+                # Date with most time
+                date_group = df.groupby('Date')['Elapsed Time'].sum().sort_values(ascending=False)
+                if not date_group.empty:
+                    top_date = date_group.index[0]
+                    top_date_time = date_group.iloc[0]
+                    WriteText(f"Date with Most Time: {top_date} ({top_date_time})")
+
+                # Subtitle with most time (if Subtitle column exists)
+                if 'Subtitle' in df.columns:
+                    subtitle_group = df.groupby('Subtitle')['Elapsed Time'].sum().sort_values(ascending=False)
+                    if not subtitle_group.empty:
+                        top_subtitle = subtitle_group.index[0]
+                        top_subtitle_time = subtitle_group.iloc[0]
+                        WriteText(f"Subtitle with Most Time: {top_subtitle} ({top_subtitle_time})")
+
+                # Title with most time (if Title column exists)
+                if 'Title' in df.columns:
+                    title_group = df.groupby('Title')['Elapsed Time'].sum().sort_values(ascending=False)
+                    if not title_group.empty:
+                        top_title = title_group.index[0]
+                        top_title_time = title_group.iloc[0]
+                        WriteText(f"Title with Most Time: {top_title} ({top_title_time})")
+
+                # Average time per session
+                avg_time = df['Elapsed Time'].mean()
+                WriteText(f"Average Time per Session: {avg_time}")
+
+                # Number of sessions
+                session_count = len(df)
+                WriteText(f"Total Number of Sessions: {session_count}")
+
+                # Time range
+                if 'Start Time' in df.columns and 'End Time' in df.columns:
+                    earliest = df['Start Time'].min()
+                    latest = df['End Time'].max()
+                    WriteText(f"Time Range: {earliest} to {latest}")
+            else:
+                WriteText("Could not load data for statistics.")
 
 ########################################################################
 
 
-# Create thread for main program
-pthread = Thread(target=program)
+# Create thread for main program as daemon to stop when main thread exits
+pthread = Thread(target=program, daemon=True)
 pthread.start()
 
 
+# Coerce the running thread into a terminatable state before closing the window
+def on_closing():
+    # In case the thread is waiting for input, update input
+    InputText()
+    window.destroy()
+
 frame.pack()
+window.protocol("WM_DELETE_WINDOW", on_closing) # Run on_closing when the window is closed
 window.geometry("300x300")
 window.mainloop()
 
