@@ -2,7 +2,7 @@
 # You can use this program to run CLI python programs
 
 import tkinter as tk
-from threading import *
+import threading
 
 window = tk.Tk()
 window.title("Tkinter CLI")
@@ -51,7 +51,8 @@ def InputText(event=None):
 # Function for writing text to the console
 def WriteText(text):
     log.configure(state='normal')
-    log.insert(tk.END, text + '\n')
+    log.insert(tk.END, text)
+    log.insert(tk.END,'\n')
     log.see("end")
     log.configure(state='disabled')
 
@@ -174,7 +175,129 @@ def convert_objects(df):
             df[f'Paused {d}'] = pd.to_timedelta(df[f'Paused {d}'])
     return df
 
+def info_data_for_title():
+    # Prompt for CSV file
+    in_file = Prompt(f"Enter file path/name for CSV to analyze, or leave empty to use default: {csv_main_path}\nPath: ")
+    if len(in_file) < 1:
+        in_file = csv_main_path
+    df = get_log_df(in_file)
+    if df is None:
+        WriteText("Could not load data.")
+        return
 
+    # Check if 'Title' column exists
+    if 'Title' not in df.columns:
+        WriteText("No 'Title' column found in the data.")
+        return
+
+    # Get unique titles
+    unique_titles = df['Title'].dropna().unique()
+    if len(unique_titles) == 0:
+        WriteText("No titles found in the data.")
+        return
+
+    # List titles
+    title_list = "\n".join([f"{i+1}: {title}" for i, title in enumerate(unique_titles)])
+    WriteText(f"Available Titles:\n{title_list}")
+
+    # Ask user to select a title
+    while True:
+        selection = Prompt("Enter the number of the title you want to analyze: ")
+        try:
+            idx = int(selection) - 1
+            if 0 <= idx < len(unique_titles):
+                selected_title = unique_titles[idx]
+                break
+            else:
+                WriteText("Invalid selection. Please enter a valid number.")
+        except ValueError:
+            WriteText("Please enter a number.")
+
+    # Filter data for selected title
+    title_df = df[df['Title'] == selected_title].copy()
+    if title_df.empty:
+        WriteText(f"No data found for title: {selected_title}")
+        return
+
+    # Check if 'Info' column exists
+    if 'Info' not in title_df.columns:
+        WriteText("No 'Info' column found for the selected title.")
+        return
+
+    # Ask for pattern
+    pattern = Prompt(f"Enter a pattern for extracting the numeric value from 'Info' (e.g., '$<n>/hr' where <n> is the number). Leave empty to extract digits: ")
+
+    def extract_numeric(info_str):
+        if not info_str:
+            return None
+        if '<n>' in pattern:
+            prefix, suffix = pattern.split('<n>')
+            stripped = str(info_str).replace(prefix, '')
+            stripped = stripped.replace(suffix, '')
+            regex_pattern = r'(\d+\.?\d*)'
+            match = re.search(regex_pattern, stripped)
+            if match:
+                try:
+                    return float(match.group(1))
+                except ValueError:
+                    pass
+        # Fallback: extract digits
+        WriteText(f"Fallback: pattern not found in {info_str}, extracting first number instead.")
+        digits = re.findall(r'\d+\.?\d*', str(info_str))
+        if digits:
+            try:
+                return float(digits[0])
+            except ValueError:
+                pass
+        return None
+
+    # Apply extraction
+    title_df['info_numeric'] = title_df['Info'].apply(extract_numeric)
+
+    # Drop rows where extraction failed
+    title_df = title_df.dropna(subset=['info_numeric', 'Elapsed Time', 'Date'])
+    if title_df.empty:
+        WriteText("Could not extract numeric values from 'Info' for the selected title.")
+        return
+
+    # Convert Elapsed Time to hours
+    title_df['elapsed_hours'] = title_df['Elapsed Time'].apply(lambda x: x.total_seconds() / 3600)
+
+    # Compute weighted value (e.g., info_numeric * elapsed_hours)
+    title_df['weighted_value'] = title_df['info_numeric'] * title_df['elapsed_hours']
+
+    # Compute statistics
+    WriteText(f"Statistics for Title: {selected_title}")
+
+    # Total weighted value
+    total_weighted = title_df['weighted_value'].sum()
+    WriteText(f"Total Weighted Value: {total_weighted:.2f}")
+
+    # Average info_numeric
+    avg_info = title_df['info_numeric'].mean()
+    WriteText(f"Average Info Numeric: {avg_info:.2f}")
+
+    # Day with highest weighted value
+    if 'Date' in title_df.columns:
+        date_group = title_df.groupby('Date')['weighted_value'].sum().sort_values(ascending=False)
+        if not date_group.empty:
+            top_date = date_group.index[0]
+            top_value = date_group.iloc[0]
+            WriteText(f"Date with Highest Weighted Value: {top_date} ({top_value:.2f})")
+
+    # Average weighted value per session
+    avg_weighted = title_df['weighted_value'].mean()
+    WriteText(f"Average Weighted Value per Session: {avg_weighted:.2f}")
+
+    # Number of sessions
+    session_count = len(title_df)
+    WriteText(f"Number of Sessions: {session_count}")
+
+    # If there are multiple unique info_numeric, show distribution
+    unique_info = title_df['info_numeric'].value_counts()
+    if len(unique_info) > 1:
+        WriteText("Info Numeric Distribution (Top 10):")
+        WriteText(unique_info.sort_values(ascending=False).head(10))
 
 
 ################################################################
@@ -182,7 +305,7 @@ def convert_objects(df):
 def program():
     looping = True
     while looping:
-        choice = Prompt("Select an option to continue:\n1: Convert text log to CSV data\n2: Fix/Restructure CSV log\n3: Quit\n4: View Statistics\n(Other functionalities to be added soon)\n\nOption: ")
+        choice = Prompt("Select an option to continue:\n1: Convert text log to CSV data\n2: Fix/Restructure CSV log\n3: View Statistics\n4: Info statistics for Title\n5: Quit\n(Other functionalities to be added soon)\n\nOption: ")
         try:
             choice = int(choice)
         except:
@@ -221,8 +344,6 @@ def program():
                 df_out[column] = df[column]
             df_out.to_csv(out_file, index=False)
         elif choice < 4:
-            looping = False
-        elif choice < 5:
             in_file = Prompt(f"Enter file path/name for CSV to analyze, or leave empty to use default: {csv_main_path}\nPath: ")
             if len(in_file) < 1:
                 in_file = csv_main_path
@@ -272,12 +393,20 @@ def program():
                     WriteText(f"Time Range: {earliest} to {latest}")
             else:
                 WriteText("Could not load data for statistics.")
+        elif choice < 5:
+            confirmation = Prompt("This tool calculates statistics for data with a specific 'Title' under the assumption that all data in the 'Info' row for this title has a numeric value that multiplies with elapsed time.\nFor example: all records with title 'Work' have 'Info' as '$18/hr' or '$22/hr'. This tool will then multiply each record's elapsed time by its number, in this case 18 or 22, to calculate statistical data.\n\nIf you have records with a certain 'Title' that have numeric data as 'Info' and wish to see statistics, confirm with 'y' or enter  anything else to return.")
+            if confirmation[0] == 'y':
+                info_data_for_title()
+        elif choice <  6:
+            looping = False
+
+    on_closing()
 
 ########################################################################
 
 
 # Create thread for main program as daemon to stop when main thread exits
-pthread = Thread(target=program, daemon=True)
+pthread = threading.Thread(target=program, daemon=True)
 pthread.start()
 
 
