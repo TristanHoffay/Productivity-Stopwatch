@@ -1,9 +1,39 @@
+# stopwatch.py
 import tkinter as tk
 import datetime
 import os
 import sys
 import pandas as pd
+import numpy as np
+import pyaudio
 
+p = pyaudio.PyAudio()
+stream = p.open(format=pyaudio.paFloat32,
+                channels=1,
+                rate=44100,
+                output=True)
+
+def play_beep(sfx=None, frequency=1000, duration=0.05, volume=0.2):
+    global stream
+    # Check if there's an MP3 file for this frequency in the sfx directory
+    if sfx:
+        sfx_file = f"sfx/{sfx}.mp3"
+        if os.path.exists(sfx_file):
+            try:
+                import pygame
+                pygame.mixer.init()
+                pygame.mixer.music.load(sfx_file)
+                pygame.mixer.music.play()
+                return
+            except Exception as e:
+                print(f"Error playing sound effect: {e}")
+                # Fall back to beep if there's an error
+
+    # Generate samples
+    t = np.linspace(0, duration, int(48000 * duration), False)
+    wave = (np.sin(2 * np.pi * frequency * t) * volume).astype(np.float32)
+
+    stream.write(wave.tobytes())
 # Notes for improvement:
 #
 # Duration is calculated every update, adding all start-stop durations.
@@ -38,8 +68,12 @@ for arg in sys.argv[1:]:
             print(f"Error: Argument {arg_name} value of {arg_value} is not of type {type(args[arg_name])}. Keeping default value of {args[arg_name]}.")
     else:
         print(f"Error: Argument {arg} is not in the format 'arg=value'. Ignoring argument.")
-
-
+from tkinter import font
+default_font = font.nametofont("TkDefaultFont")
+default_font.configure(size=8)  # make text smaller
+window.option_add("*Font", default_font)
+window.option_add("*Button.padX", 4)
+window.option_add("*Button.padY", 2)
 # Level of debug info printed during runtime. Higher levels also print lower levels
 # 0 = no debug info
 # 1 = basic info
@@ -86,6 +120,7 @@ def ResetTimer():
     timestart_text.set("Click [Start/Stop] to start timer.")
     ChangeBGColor(window, "#bad1ff")
     UpdateTimer()
+    play_beep(sfx='reset', frequency=200)
 
 # Update a backup file for the log when writing. 'filepath' is for non-backup
 def UpdateBackup(filepath):
@@ -127,6 +162,7 @@ def LogTime():
         print(f"Time written to {log_path_txt}")
     # Change to green to indicate success
     ChangeBGColor(window, "#d2ffde")
+    play_beep(sfx='log', frequency=1000)
 
 # New function for logging the time to a csv instead of a text file.
 def LogTimeCSV():
@@ -158,6 +194,7 @@ def LogTimeCSV():
         print(f"Time written to {log_path_csv}")
     # Change to green to indicate success
     ChangeBGColor(window, "#d2ffde")
+    play_beep(sfx='log', frequency=1200)
 
 def GetCSVData():
     df = None
@@ -186,7 +223,10 @@ def ToggleTimer():
     toggle_media_playback()
     ChangeBGColor(window, "#ffd1d8" if timeractive else "#e1fbff")
     if timeractive:
+        play_beep(sfx='start', frequency=600)
         UpdateTimer()
+    else:
+        play_beep(sfx='pause', frequency=300)
 
 # Uses global list of timer toggles and returns sum of durations (plus runtime if active)
 def GetElapsedTime():
@@ -277,7 +317,10 @@ def toggle_media_playback():
             print(f"Media toggle failed: {e}")
 confirm_open = False
 def OnClose():
-    global confirm_open, timerPauses
+    global confirm_open, timerPauses, stream, p
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
     if not confirm_open:
         # Ask for confirmation with options to log time or not
         if len(timerPauses) > 0:
@@ -298,7 +341,7 @@ window.protocol("WM_DELETE_WINDOW", OnClose)
 
 # Timer
 timerframe = tk.Frame(window)
-timerlbl = tk.Label(timerframe, textvariable=timertext, font=('Courier 30'), padx=30, pady=20)
+timerlbl = tk.Label(timerframe, textvariable=timertext, font=('Courier 20'), padx=5, pady=5)
 timerlbl.pack()
 timerframe.pack()
 
@@ -352,5 +395,4 @@ analysisButton.pack()
 ux.pack()
 
 ChangeBGColor(window, "#bad1ff")
-window.geometry("300x400")
 window.mainloop()
