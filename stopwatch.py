@@ -315,6 +315,15 @@ def toggle_media_playback():
     except Exception as e:
         if DEBUG_LEVEL >= 1:
             print(f"Media toggle failed: {e}")
+
+def update_info(event):
+    df = GetCSVData()
+    global info_text, subtitle_text
+    subt = df[df['Subtitle']==subtitle_text.get()]
+    if not subt.empty:
+        info_text.set(subt.iloc[-1]['Info'])
+
+
 confirm_open = False
 def OnClose():
     global confirm_open, timerPauses, stream, p
@@ -358,13 +367,14 @@ media_checkbox.pack()
 
 from tkinter import ttk
 name_select = ttk.Combobox(ux, textvariable = name_text)
-names = GetCSVData().get('Title', pd.Series()).unique().tolist()
+names = GetCSVData().get('Title', pd.Series()).dropna().unique().tolist()
 name_select['values'] = names
 name_select.pack()
 sub_select = ttk.Combobox(ux, textvariable = subtitle_text)
-subs = GetCSVData().get('Subtitle', pd.Series()).unique().tolist()
+subs = GetCSVData().get('Subtitle', pd.Series()).dropna()[::-1].unique().tolist()
 sub_select['values'] = subs
 sub_select.pack()
+sub_select.bind("<<ComboboxSelected>>", update_info)
 
 info_input = tk.Entry(ux, textvariable = info_text)
 info_input.pack()
