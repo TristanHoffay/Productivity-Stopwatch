@@ -1,3 +1,3 @@
 #!/bin/bash
-python3 stopwatch.py 0
+python3 stopwatch.py
 
