@@ -7,6 +7,8 @@ import pandas as pd
 import numpy as np
 import pyaudio
 
+SETTINGS_FILENAME = 'usersettings.ini'
+
 p = pyaudio.PyAudio()
 stream = p.open(format=pyaudio.paFloat32,
                 channels=1,
@@ -54,10 +56,24 @@ if os.path.exists('icon.png'):
     window.iconphoto(False, icon)
 
 # Get command-line arguments
-# Currently only one is debug level
 # No checking or parsing done currently, just basic debug use
-# Parse command-line arguments with default values
-args = {"debug_level": 0, "log_path_txt": 'timelog.txt', "log_path_csv": 'time_log.csv', "analysis_script": 'log_analysis_gui.py'}  # Default debug level is 0
+# Needs validation added, with defaults as fallback and warnings printed
+# Initialize default values
+defaults = {"debug_level": 0, "log_path_txt": 'timelog.txt', "log_path_csv": 'time_log.csv', "analysis_script": 'log_analysis_gui.py'}
+# New: load settings first, before args.
+import configparser
+settings = configparser.ConfigParser()
+# Check if settings file exists. If not, create it with defaults
+if os.path.isfile(SETTINGS_FILENAME):
+    settings.read(SETTINGS_FILENAME)
+else:
+    settings['DEFAULT'] = defaults
+    with open(SETTINGS_FILENAME, 'w') as ini_f:
+        settings.write(ini_f)
+# TODO: more sophisticated implentation. Error checking and validation, with defaults as fallback
+# maybe a better way of reading in settings and overwriting with args
+args = {"debug_level": settings.getint('DEFAULT', 'debug_level'), "log_path_txt": settings['DEFAULT']['log_path_txt'], "log_path_csv": settings['DEFAULT']['log_path_csv'], "analysis_script": settings['DEFAULT']['analysis_script']}
+# Parse command line args to override settings and defaults
 for arg in sys.argv[1:]:
     if arg.find('=') != -1:
         arg_name, arg_value = arg.split('=')
