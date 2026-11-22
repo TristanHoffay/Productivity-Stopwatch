@@ -6,6 +6,7 @@ import sys
 import pandas as pd
 import numpy as np
 import pyaudio
+import uuid
 
 p = pyaudio.PyAudio()
 stream = p.open(format=pyaudio.paFloat32,
@@ -88,6 +89,7 @@ analysis_script = args["analysis_script"]
 
 timerPauses = []
 timeractive = False
+timerID = None # Will be set with uuid (uuid4)
 timertext = tk.StringVar(window, "00h00m00.0s")
 timestart_text = tk.StringVar(window, "Click [Start/Stop] to start timer.")
 flagtime = None
@@ -117,6 +119,8 @@ def ResetTimer():
     if flagtime is not None:
         ToggleFlag()
     timerPauses = []
+    global timerID
+    timerID = None
     timestart_text.set("Click [Start/Stop] to start timer.")
     ChangeBGColor(window, "#bad1ff")
     UpdateTimer()
@@ -164,10 +168,27 @@ def LogTime():
     ChangeBGColor(window, "#d2ffde")
     play_beep(sfx='log', frequency=1000)
 
+# Return the logged entry (row) for the currently loaded timer by ID. Returns False if no match found.
+# Takes DF as argument, so it doesnt have to reload from file or potentially desync
+# Accepts an ID argument of type UUID, but uses global timerID if not provided
+# Returns index, although could be modified to return the whole row
+def GetCurrentTimerFromLog(df, ID=None):
+    if ID == None: ID = timerID
+    if ID:
+        current = df.loc[df['ID'] == ID]
+        if len(current) > 0:
+            if DEBUG_LEVEL >= 1:
+                print(f"Current timer matched to row(s):\n{current}")
+            if len(current) > 1:
+                print(f"Warning: More than 1 matching timer ID found in log. Using most recent.")
+            return current.iloc[-1].name # Returns the index. Remove '.name' to return the whole row.
+    return False
+
 # New function for logging the time to a csv instead of a text file.
 def LogTimeCSV():
     global timeractive
     global timerPauses
+    global timerID
     if len(timerPauses) < 1:
         return
     if timeractive:
@@ -175,8 +196,11 @@ def LogTimeCSV():
     df = GetCSVData()
     if DEBUG_LEVEL > 1:
         print(f"Time log with {df.shape[0]} rows read into DataFrame.\n")
+    currentTimer = GetCurrentTimerFromLog(df)
+    if not currentTimer:
+        timerID = uuid.uuid4()
     totaltime = GetElapsedTime()
-    output = {'Date': datetime.datetime.now().date(),'Title': name_text.get(), 'Subtitle': subtitle_text.get(), 'Info': info_text.get(), 'Elapsed Time': totaltime, 'Start Time': timerPauses[0], 'End Time': timerPauses[-1]}
+    output = {'Date': datetime.datetime.now().date(),'Title': name_text.get(), 'Subtitle': subtitle_text.get(), 'Info': info_text.get(), 'ID': timerID, 'Elapsed Time': totaltime, 'Start Time': timerPauses[0], 'End Time': timerPauses[-1]}
     durcount = len(timerPauses) // 2
     output['Duration Count'] =  durcount
     for d in range(durcount):
@@ -189,6 +213,8 @@ def LogTimeCSV():
     if DEBUG_LEVEL > 1:
         print(f"New row for time record created:\n{new_data}\nAdding to log...")
     df = pd.concat([df, new_data])
+    if currentTimer:
+        df = df.drop(currentTimer) # Remove loaded time to prevent dupes. Done after append to prevent data loss if append fails
     df.to_csv(log_path_csv, index=False)
     if DEBUG_LEVEL >= 1:
         print(f"Time written to {log_path_csv}")
@@ -196,12 +222,34 @@ def LogTimeCSV():
     ChangeBGColor(window, "#d2ffde")
     play_beep(sfx='log', frequency=1200)
 
+# Fills missing ID values with newly generated uuids. Should be upgraded with better duplicate detection and validation
+def migrate_IDs(df):
+    mask = df['ID'].isna()
+    df.loc[mask, 'ID'] = [str(uuid.uuid4()) for _ in range(mask.sum())]
+    return df
+
+# Copied from log_analysis_gui. Should be tailored to this script or replaced with reference to other script's def
+def convert_objects(df):
+    #df['Date'] = pd.to_datetime(df['Date'])
+    #df['Elapsed Time'] = pd.to_timedelta(df['Elapsed Time'])
+    #df['Start Time'] = pd.to_datetime(df['Start Time'])
+    #df['End Time'] = pd.to_datetime(df['End Time'])
+    df = migrate_IDs(df)
+    df['ID'] = df['ID'].apply(uuid.UUID)
+    # for d in range(1, int(df['Duration Count'].max()) + 1):
+    #     df[f'Duration {d}'] = pd.to_timedelta(df[f'Duration {d}'])
+    #     if d < int(df['Duration Count'].max()):
+    #         df[f'Paused {d}'] = pd.to_timedelta(df[f'Paused {d}'])
+    return df
+
 def GetCSVData():
     df = None
     # Check if CSV log already exists, and load it. If not, start with empty DF
     if os.path.isfile(log_path_csv):
         UpdateBackup(log_path_csv)
         df = pd.read_csv(log_path_csv)
+        # There needs to be some data cleaning here. log_analysis_gui has a func for this already
+        df = convert_objects(df)
     else:
         if DEBUG_LEVEL > 1:
             print(f"No file found at {log_path_csv}. Creating empty DataFrame.")
