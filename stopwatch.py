@@ -191,13 +191,16 @@ def LogTime():
 def GetCurrentTimerFromLog(df, ID=None):
     if ID == None: ID = timerID
     if ID:
-        current = df.loc[df['ID'] == ID]
-        if len(current) > 0:
-            if DEBUG_LEVEL >= 1:
-                print(f"Current timer matched to row(s):\n{current}")
-            if len(current) > 1:
-                print(f"Warning: More than 1 matching timer ID found in log. Using most recent.")
-            return current.iloc[-1].name # Returns the index. Remove '.name' to return the whole row.
+        try:
+            current = df.loc[df['ID'] == ID]
+            if len(current) > 0:
+                if DEBUG_LEVEL >= 1:
+                    print(f"Current timer matched to row(s):\n{current}")
+                if len(current) > 1:
+                    print(f"Warning: More than 1 matching timer ID found in log. Using most recent.")
+                return current.iloc[-1].name # Returns the index. Remove '.name' to return the whole row.
+        except:
+            return False
     return False
 
 # New function for logging the time to a csv instead of a text file.
@@ -240,6 +243,8 @@ def LogTimeCSV():
 
 # Fills missing ID values with newly generated uuids. Should be upgraded with better duplicate detection and validation
 def migrate_IDs(df):
+    if 'ID' not in df.columns:
+        df['ID'] = pd.NA
     mask = df['ID'].isna()
     df.loc[mask, 'ID'] = [str(uuid.uuid4()) for _ in range(mask.sum())]
     return df
