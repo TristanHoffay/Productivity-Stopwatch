@@ -9,6 +9,12 @@ import pyaudio
 import uuid
 
 SETTINGS_FILENAME = 'usersettings.ini'
+# The data (log) version. Increment when log format is modified or updated, and add migration code below.
+DATA_VER = 1
+"""
+Version 1:
+    Introduction of log data versioning. Log CSV now contains "Version:,N" metadata in first row, before DF
+"""
 
 p = pyaudio.PyAudio()
 stream = p.open(format=pyaudio.paFloat32,
@@ -234,7 +240,9 @@ def LogTimeCSV():
     df = pd.concat([df, new_data])
     if currentTimer:
         df = df.drop(currentTimer) # Remove loaded time to prevent dupes. Done after append to prevent data loss if append fails
-    df.to_csv(log_path_csv, index=False)
+    with open(log_path_csv, 'w', newline='') as f: # Prepend log file with data version metadata
+        f.write(f"Version:,{DATA_VER}\n")
+        df.to_csv(f, index=False)
     if DEBUG_LEVEL >= 1:
         print(f"Time written to {log_path_csv}")
     # Change to green to indicate success
@@ -263,14 +271,55 @@ def convert_objects(df):
     #         df[f'Paused {d}'] = pd.to_timedelta(df[f'Paused {d}'])
     return df
 
+# Log migration - assert log version and update to newest format
+# Returns DF if data is valid version or was successfully migrated. False if there was an issue.
+def MigrateLog(filepath):
+    # Data version <1 - if log does not have a self-proclaimed version type, clean to V1.0
+    import csv
+    log_version = None
+    # Check if version is marked in log
+    with open(filepath, newline='') as f:
+        log = csv.reader(f)
+        first_line = next(log)
+        if "Version:" in first_line:
+            # Version is defined, so read it. It should be in the column after "Version"
+            log_version = int(first_line[first_line.index("Version:") + 1])
+    df = None
+    if log_version == None:
+        # No version defined, so clean it up.
+        df = pd.read_csv(filepath)
+        print(f"No log version detected. Attempting to validate it and assert Version 1.")
+        # Make sure that all columns exist
+        if not {"Date", "Elapsed Time", "Start Time", "End Time", "Duration Count"}.issubset(df.columns):
+            print(f"Log data is missing an essential column. Existing columns:\n{df.columns}")
+            return False # If missing essential collumns (these should have always existed), return False (error)
+        # Title, Subtitle, and Info were added after, but do not cause issues if missing (will be added automatically)
+        # However, ID column must exist.
+        df = migrate_IDs(df)
+        # I believe that is all that's required for unversioned data to meet V1, but fixes should be added here.
+        log_version = 1
+    else: # If there is a version recorded then skip that line when reading CSV data
+        df = pd.read_csv(filepath, skiprows=1)
+
+    # Version number should now be known (>=1), so migrate in order if necessary.
+    if log_version < DATA_VER:
+        # do migrations sequentially
+        #
+        pass
+    print(f"Log data at {filepath} successfully migrated to Version {DATA_VER}.")
+    return df
+
 def GetCSVData():
     df = None
     # Check if CSV log already exists, and load it. If not, start with empty DF
     if os.path.isfile(log_path_csv):
         UpdateBackup(log_path_csv)
-        df = pd.read_csv(log_path_csv)
-        # There needs to be some data cleaning here. log_analysis_gui has a func for this already
-        df = convert_objects(df)
+        df = MigrateLog(log_path_csv)
+        if df is False or None:
+            raise Exception(f"Log file at {log_path_csv} does not have a valid version and could not be migrated.")
+        else:
+            # There needs to be some data cleaning here. log_analysis_gui has a func for this already
+            df = convert_objects(df)
     else:
         if DEBUG_LEVEL > 1:
             print(f"No file found at {log_path_csv}. Creating empty DataFrame.")
@@ -436,11 +485,13 @@ media_checkbox.pack()
 
 from tkinter import ttk
 name_select = ttk.Combobox(ux, textvariable = name_text)
-names = GetCSVData().get('Title', pd.Series()).dropna().unique().tolist()
+init_df = GetCSVData()
+names = init_df.get('Title', pd.Series()).dropna().unique().tolist()
 name_select['values'] = names
 name_select.pack()
 sub_select = ttk.Combobox(ux, textvariable = subtitle_text)
-subs = GetCSVData().get('Subtitle', pd.Series()).dropna()[::-1].unique().tolist()
+subs = init_df.get('Subtitle', pd.Series()).dropna()[::-1].unique().tolist()
+del init_df
 sub_select['values'] = subs
 sub_select.pack()
 sub_select.bind("<<ComboboxSelected>>", update_info)
